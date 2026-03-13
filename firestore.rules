@@ -1,0 +1,226 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: userId
+    // Fields:
+    //   - email: string (required)
+    //   - name: string (optional)
+    //   - role: string (required, 'admin', 'editor', 'viewer')
+    //   - createdAt: string (required)
+    //
+    // Collection: blogs
+    // Document ID: blogId
+    // Fields:
+    //   - title: string (required)
+    //   - slug: string (required)
+    //   - content: string (required)
+    //   - excerpt: string (optional)
+    //   - status: string (required, 'draft', 'published')
+    //   - authorId: string (required)
+    //   - imageUrl: string (optional)
+    //   - createdAt: string (required)
+    //   - updatedAt: string (required)
+    //
+    // Collection: portfolio
+    // Document ID: portfolioId
+    // Fields:
+    //   - title: string (required)
+    //   - slug: string (required)
+    //   - description: string (required)
+    //   - clientName: string (optional)
+    //   - category: string (optional)
+    //   - status: string (required, 'draft', 'published')
+    //   - imageUrl: string (optional)
+    //   - createdAt: string (required)
+    //   - updatedAt: string (required)
+    //
+    // Collection: leads
+    // Document ID: leadId
+    // Fields:
+    //   - name: string (required)
+    //   - email: string (optional)
+    //   - phone: string (optional)
+    //   - company: string (optional)
+    //   - status: string (required, 'new', 'contacted', 'proposal', 'won', 'lost')
+    //   - value: number (optional)
+    //   - notes: string (optional)
+    //   - createdAt: string (required)
+    //   - updatedAt: string (required)
+    //
+    // Collection: estimates
+    // Document ID: estimateId
+    // Fields:
+    //   - leadId: string (optional)
+    //   - clientName: string (required)
+    //   - totalAmount: number (required)
+    //   - items: list (required)
+    //   - status: string (required, 'draft', 'sent', 'accepted', 'rejected')
+    //   - createdAt: string (required)
+    //   - updatedAt: string (required)
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+         (request.auth.token.email == "sharma1.aayu@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    function isEditor() {
+      return isAuthenticated() &&
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in ['admin', 'editor'] ||
+         (request.auth.token.email == "sharma1.aayu@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    function isValidEmail(email) {
+      return email is string && email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    function isValidDateString(dateStr) {
+      return dateStr is string && dateStr.matches("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}.*Z?$");
+    }
+
+    function isValidOptionalString(field, minLen, maxLen) {
+      return !(field in request.resource.data) ||
+             (request.resource.data[field] is string &&
+              request.resource.data[field].size() >= minLen &&
+              request.resource.data[field].size() <= maxLen);
+    }
+    
+    function isValidOptionalNumber(field, minVal) {
+      return !(field in request.resource.data) ||
+             (request.resource.data[field] is number &&
+              request.resource.data[field] >= minVal);
+    }
+
+    // Domain Validators
+    function isValidUser(data) {
+      return hasOnlyAllowedFields(['email', 'name', 'role', 'createdAt']) &&
+             hasRequiredFields(['email', 'role', 'createdAt']) &&
+             isValidEmail(data.email) &&
+             isValidOptionalString('name', 1, 100) &&
+             data.role in ['admin', 'editor', 'viewer'] &&
+             isValidDateString(data.createdAt);
+    }
+
+    function isValidBlogPost(data) {
+      return hasOnlyAllowedFields(['title', 'slug', 'content', 'excerpt', 'status', 'authorId', 'imageUrl', 'createdAt', 'updatedAt']) &&
+             hasRequiredFields(['title', 'slug', 'content', 'status', 'authorId', 'createdAt', 'updatedAt']) &&
+             data.title is string && data.title.size() > 0 && data.title.size() <= 200 &&
+             data.slug is string && data.slug.size() > 0 && data.slug.size() <= 200 &&
+             data.content is string && data.content.size() <= 1000000 &&
+             isValidOptionalString('excerpt', 0, 1000) &&
+             data.status in ['draft', 'published'] &&
+             data.authorId is string && data.authorId.size() > 0 && data.authorId.size() <= 100 &&
+             isValidOptionalString('imageUrl', 0, 1000) &&
+             isValidDateString(data.createdAt) &&
+             isValidDateString(data.updatedAt);
+    }
+
+    function isValidPortfolioItem(data) {
+      return hasOnlyAllowedFields(['title', 'slug', 'description', 'clientName', 'category', 'status', 'imageUrl', 'createdAt', 'updatedAt']) &&
+             hasRequiredFields(['title', 'slug', 'description', 'status', 'createdAt', 'updatedAt']) &&
+             data.title is string && data.title.size() > 0 && data.title.size() <= 200 &&
+             data.slug is string && data.slug.size() > 0 && data.slug.size() <= 200 &&
+             data.description is string && data.description.size() <= 1000000 &&
+             isValidOptionalString('clientName', 0, 200) &&
+             isValidOptionalString('category', 0, 100) &&
+             data.status in ['draft', 'published'] &&
+             isValidOptionalString('imageUrl', 0, 1000) &&
+             isValidDateString(data.createdAt) &&
+             isValidDateString(data.updatedAt);
+    }
+
+    function isValidLead(data) {
+      return hasOnlyAllowedFields(['name', 'email', 'phone', 'company', 'status', 'value', 'notes', 'createdAt', 'updatedAt']) &&
+             hasRequiredFields(['name', 'status', 'createdAt', 'updatedAt']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 200 &&
+             (!( 'email' in data ) || isValidEmail(data.email)) &&
+             isValidOptionalString('phone', 0, 50) &&
+             isValidOptionalString('company', 0, 200) &&
+             data.status in ['new', 'contacted', 'proposal', 'won', 'lost'] &&
+             isValidOptionalNumber('value', 0) &&
+             isValidOptionalString('notes', 0, 10000) &&
+             isValidDateString(data.createdAt) &&
+             isValidDateString(data.updatedAt);
+    }
+
+    function isValidEstimate(data) {
+      return hasOnlyAllowedFields(['leadId', 'clientName', 'totalAmount', 'items', 'status', 'createdAt', 'updatedAt']) &&
+             hasRequiredFields(['clientName', 'totalAmount', 'items', 'status', 'createdAt', 'updatedAt']) &&
+             isValidOptionalString('leadId', 0, 100) &&
+             data.clientName is string && data.clientName.size() > 0 && data.clientName.size() <= 200 &&
+             data.totalAmount is number && data.totalAmount >= 0 &&
+             data.items is list && data.items.size() <= 100 &&
+             data.status in ['draft', 'sent', 'accepted', 'rejected'] &&
+             isValidDateString(data.createdAt) &&
+             isValidDateString(data.updatedAt);
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if isAuthenticated() && isValidUser(request.resource.data) && ((isOwner(userId) && request.resource.data.role == 'viewer') || isAdmin());
+      allow update: if isAuthenticated() && isValidUser(request.resource.data) && ((isOwner(userId) && request.resource.data.role == resource.data.role && request.resource.data.createdAt == resource.data.createdAt) || isAdmin());
+      allow delete: if isAdmin();
+    }
+
+    match /blogs/{blogId} {
+      allow read: if resource.data.status == 'published' || isEditor();
+      allow create: if isEditor() && isValidBlogPost(request.resource.data) && request.resource.data.authorId == request.auth.uid;
+      allow update: if isEditor() && isValidBlogPost(request.resource.data) && request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if isAdmin() || (isEditor() && resource.data.authorId == request.auth.uid);
+    }
+
+    match /portfolio/{portfolioId} {
+      allow read: if resource.data.status == 'published' || isEditor();
+      allow create: if isEditor() && isValidPortfolioItem(request.resource.data);
+      allow update: if isEditor() && isValidPortfolioItem(request.resource.data) && request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if isAdmin() || isEditor();
+    }
+
+    match /leads/{leadId} {
+      allow read: if isEditor();
+      allow create: if isEditor() && isValidLead(request.resource.data);
+      allow update: if isEditor() && isValidLead(request.resource.data) && request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if isAdmin();
+    }
+
+    match /estimates/{estimateId} {
+      allow read: if isEditor();
+      allow create: if isEditor() && isValidEstimate(request.resource.data);
+      allow update: if isEditor() && isValidEstimate(request.resource.data) && request.resource.data.createdAt == resource.data.createdAt;
+      allow delete: if isAdmin();
+    }
+  }
+}
